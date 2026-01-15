@@ -26,6 +26,16 @@ from data import simulate_short_bursts
 from sindy_clw_lib import make_clw_library
 from plot_validation import generate_validation_figures, plot_threshold_pareto
 
+from coeff_recovery import (
+    build_true_coefficients,
+    coefficient_recovery_rows,
+    equation_summaries,
+    print_equation_summaries,
+    print_recovery_table,
+    save_recovery_csv,
+    save_recovery_markdown,
+)
+
 STATE_NAMES = ["P", "S", "Z", "C"]
 
 
@@ -255,6 +265,25 @@ def main() -> None:
     print(f"selected_threshold={best['threshold']:.3e}, nnz={best['nnz']}, mse={best['mse']:.3e}, score={best['score']:.3f}")
     model.print()
 
+    # --- Coefficient recovery: compare identified vs ground truth in the same feature basis ---
+    feature_names = model.feature_library.get_feature_names(STATE_NAMES)
+    Xi_hat = np.asarray(model.coefficients(), dtype=float)
+    Xi_true = build_true_coefficients(feature_names, params)
+
+    eq_names = ["Pdot", "Sdot", "Zdot", "Cdot"]
+    rows = coefficient_recovery_rows(
+        feature_names,
+        Xi_true,
+        Xi_hat,
+        equation_names=eq_names,
+        nz_tol=0.0,
+        rel_floor=1e-12,
+        include_tn=False,
+    )
+    summaries = equation_summaries(rows, equation_names=eq_names, Xi_true=Xi_true, Xi_hat=Xi_hat, nz_tol=0.0)
+    print_equation_summaries(summaries)
+    print_recovery_table(rows)
+
     os.makedirs(cfg.outdir, exist_ok=True)
     save_path = os.path.join(cfg.outdir, "identified_model.npz")
     np.savez_compressed(
@@ -264,6 +293,14 @@ def main() -> None:
         coefficients=np.asarray(model.coefficients(), dtype=float),
     )
     print(f"\nSaved identified coefficients to: {save_path}")
+
+    # Save coefficient recovery artifacts
+    recovery_csv = os.path.join(cfg.outdir, "coef_recovery.csv")
+    recovery_md = os.path.join(cfg.outdir, "coef_recovery.md")
+    save_recovery_csv(rows, recovery_csv)
+    save_recovery_markdown(rows, recovery_md)
+    print(f"Saved coefficient recovery table to: {recovery_csv}")
+    print(f"Saved coefficient recovery table to: {recovery_md}")
 
     # --- Out-of-sample metrics on held-out trajectories (test only) ---
     if bool(cfg.eval_oos):
