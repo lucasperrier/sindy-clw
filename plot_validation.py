@@ -25,6 +25,120 @@ from sindy_clw_lib import make_clw_library
 STATE_NAMES = ["P", "S", "Z", "C"]
 
 
+def _pareto_efficient(points: np.ndarray) -> np.ndarray:
+    """Return boolean mask for Pareto-efficient points.
+
+    We assume a minimization problem in both coordinates.
+    points: array of shape (n, 2) with columns [mse, nnz].
+    """
+    pts = np.asarray(points, dtype=float)
+    if pts.ndim != 2 or pts.shape[1] != 2:
+        raise ValueError(f"Expected points shape (n, 2), got {pts.shape}")
+
+    # Sort by increasing mse, then increasing nnz. Sweep keeping lowest nnz so far.
+    order = np.lexsort((pts[:, 1], pts[:, 0]))
+    pts_s = pts[order]
+
+    best_nnz = np.inf
+    eff_s = np.zeros(pts_s.shape[0], dtype=bool)
+    for i, (_, nnz) in enumerate(pts_s):
+        if nnz < best_nnz:
+            eff_s[i] = True
+            best_nnz = nnz
+
+    eff = np.zeros(pts.shape[0], dtype=bool)
+    eff[order] = eff_s
+    return eff
+
+
+def plot_threshold_pareto(
+    results: list[dict],
+    *,
+    outdir: str = "outputs",
+    filename: str = "fig_pareto_thresholds.png",
+    best_threshold: float | None = None,
+    log_mse: bool = True,
+) -> str:
+    """Plot MSE vs sparsity (nnz) for all thresholds and highlight the Pareto front.
+
+    Expected `results` entries (as produced in `main_experiment.py`):
+      - threshold: float
+      - mse: float
+      - nnz: int
+
+    Returns:
+        Path to the saved figure.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    if not results:
+        raise ValueError("No results to plot.")
+
+    thresholds = np.asarray([float(r["threshold"]) for r in results], dtype=float)
+    mses = np.asarray([float(r["mse"]) for r in results], dtype=float)
+    nnz = np.asarray([int(r["nnz"]) for r in results], dtype=int)
+
+    pts = np.column_stack([mses, nnz])
+    eff = _pareto_efficient(pts)
+
+    # color points by log10(threshold) for readability across orders of magnitude
+    with np.errstate(divide="ignore"):
+        cval = np.log10(np.maximum(thresholds, np.finfo(float).tiny))
+
+    os.makedirs(outdir, exist_ok=True)
+    outpath = os.path.join(outdir, filename)
+
+    fig, ax = plt.subplots(1, 1, figsize=(7.5, 5.5))
+    sc = ax.scatter(
+        nnz,
+        np.log10(mses) if bool(log_mse) else mses,
+        c=cval,
+        cmap="viridis",
+        s=38,
+        alpha=0.9,
+        edgecolor="none",
+        label="threshold sweep",
+    )
+
+    # Pareto front: connect efficient points sorted by nnz
+    idx_eff = np.where(eff)[0]
+    if idx_eff.size > 0:
+        idx_line = idx_eff[np.argsort(nnz[idx_eff])]
+        y_line = np.log10(mses[idx_line]) if bool(log_mse) else mses[idx_line]
+        ax.plot(nnz[idx_line], y_line, color="tab:red", linewidth=2.0, label="Pareto front")
+
+    if best_threshold is not None:
+        # highlight chosen model
+        j = int(np.argmin(np.abs(thresholds - float(best_threshold))))
+        ax.scatter(
+            [nnz[j]],
+            [np.log10(mses[j]) if bool(log_mse) else mses[j]],
+            s=120,
+            facecolors="none",
+            edgecolors="black",
+            linewidths=2.0,
+            label=f"selected (thr={float(thresholds[j]):.2e})",
+            zorder=5,
+        )
+
+    ax.set_xlabel("Model sparsity: nnz coefficients")
+    ax.set_ylabel("log10(derivative MSE)" if bool(log_mse) else "derivative MSE")
+    ax.set_title("Threshold sweep: accuracy vs sparsity (Pareto front)")
+    ax.grid(True, alpha=0.25)
+
+    cbar = fig.colorbar(sc, ax=ax)
+    cbar.set_label("log10(threshold)")
+    ax.legend(loc="best", frameon=False)
+
+    fig.tight_layout()
+    fig.savefig(outpath, dpi=200)
+    plt.close(fig)
+    return outpath
+
+
 def _load_identified_model(npz_path: str) -> tuple[list[str], np.ndarray]:
     data = np.load(npz_path, allow_pickle=True)
     feature_names = [str(x) for x in data["feature_names"].tolist()]
