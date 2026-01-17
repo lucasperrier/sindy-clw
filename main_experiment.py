@@ -54,7 +54,7 @@ class Config:
     # (Log-spaced thresholds for STLSQ.)
     thresholds: tuple[float, ...] = tuple(np.logspace(-6, 0, 25).astype(float).tolist())
     nnz_weight: float = 2e-3
-    S_min: float = 0.2
+    S_min: float = 0.05
     eps_inv: float = 1e-8
 
     outdir: str = "outputs"
@@ -87,6 +87,45 @@ def filter_small_S(X_list: list[np.ndarray], dX_list: list[np.ndarray], *, S_min
             dX_out.append(dX[keep])
     if not X_out:
         raise ValueError("All samples were filtered out by S_min.")
+    return X_out, dX_out
+
+
+def filter_drop_trajectories_below_S(
+    X_list: list[np.ndarray],
+    dX_list: list[np.ndarray],
+    *,
+    S_min: float,
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Option A: drop entire trajectories if any sample violates S >= S_min.
+
+    This preserves contiguous, regularly-sampled time series, which is important
+    if you plan to estimate derivatives from time-series data later.
+
+    Notes:
+    - Assumes state ordering [P, S, Z, C] so S is column 1.
+    - If every trajectory violates the constraint, raises ValueError.
+    """
+    if len(X_list) != len(dX_list):
+        raise ValueError("X_list and dX_list must have the same length")
+
+    thr = float(S_min)
+    X_out: list[np.ndarray] = []
+    dX_out: list[np.ndarray] = []
+
+    for X, dX in zip(X_list, dX_list):
+        X = np.asarray(X, dtype=float)
+        dX = np.asarray(dX, dtype=float)
+        if X.ndim != 2 or X.shape[1] != 4:
+            raise ValueError(f"Expected X shape (T, 4), got {X.shape}")
+        if dX.shape != X.shape:
+            raise ValueError(f"Expected dX shape {X.shape}, got {dX.shape}")
+
+        if np.all(X[:, 1] >= thr):
+            X_out.append(X)
+            dX_out.append(dX)
+
+    if not X_out:
+        raise ValueError("All trajectories were discarded by S_min (Option A).")
     return X_out, dX_out
 
 
@@ -222,7 +261,8 @@ def main() -> None:
     cfg = Config()
     params = {"Gd": float(cfg.Gd), "d": float(cfg.d), "gz": float(cfg.gz)}
     X_list, dX_list = simulate_short_bursts(params=params, n_traj=int(cfg.n_traj), T=float(cfg.burst_T), dt=float(cfg.dt), seed=int(cfg.seed))
-    X_list, dX_list = filter_small_S(X_list, dX_list, S_min=float(cfg.S_min))
+    # Option A filtering: drop whole trajectories if they enter the small-S region.
+    X_list, dX_list = filter_drop_trajectories_below_S(X_list, dX_list, S_min=float(cfg.S_min))
 
     if bool(cfg.eval_oos):
         X_train, dX_train, X_test, dX_test = split_trajectories(
