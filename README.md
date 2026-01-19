@@ -1,77 +1,71 @@
-# sindy-clw (minimal SINDy identification)
+# sindy-clw (curated CLW SINDy mini-research repo)
 
-This repo is a hard-pruned, minimal example demonstrating the core SINDy claim:
+This repo is intentionally narrow: it contains only the code needed to run a small set of CLW / SINDy experiments, organized into distinct regimes.
 
-> With noise-free simulated data and **oracle derivatives** from the CLW system, sparse regression (SINDy/STLSQ) can recover a parsimonious model in the provided candidate library.
+All experiment entrypoints live in `experiments/`.
 
-## What’s included
+## Install
 
-- `clw.py`: the ground-truth CLW ODE right-hand side.
-- `data.py`: simulation of many short trajectories using `solve_ivp`, plus oracle derivatives by re-evaluating `clw_rhs` along each trajectory.
-- `sindy_clw_lib.py`: the candidate feature library used by SINDy.
-- `main_experiment.py`: end-to-end script: simulate → build library → fit SINDy (STLSQ) → print equations → save coefficients.
+Install the dependencies in `requirements.txt`.
 
-## Quickstart
+## Run the experiments
 
-### 1) Environment
+All outputs go to:
 
-You need Python plus:
+- `outputs/figures/`
+- `outputs/tables/`
 
-- `numpy`
-- `scipy`
-- `pysindy`
-
-Install however you manage environments (venv/conda). This repo purposely avoids extra tooling.
-
-### 2) Run the identification
+You can run everything in one go via:
 
 ```bash
-python main_experiment.py
+python experiments/run_all.py
 ```
 
-Expected terminal output looks like:
+### Poster baseline (no noise, oracle derivatives, physics-informed library)
 
-```
-=== Identified SINDy Model (CLW) ===
-selected_threshold=..., nnz=..., mse=..., score=...
-(x0)' = ...
-(x1)' = ...
-(x2)' = ...
-(x3)' = ...
+- Script: `experiments/poster_baseline.py`
+- Outputs:
+	- `outputs/figures/fig_poster_timeseries_overlay.png`
+	- `outputs/figures/fig_poster_phase_space_chaos.png`
 
-Saved identified coefficients to: outputs/identified_model.npz
-```
+Notes:
 
-### 3) Saved result artifact
+- The long-horizon figure is a *chaos sensitivity* demo: it compares the true CLW system from $x_0$ vs the true CLW system from $x_0$ with a small perturbation only in $C$.
 
-The script writes:
+### State noise + oracle derivatives (physics-informed library)
 
-- `outputs/identified_model.npz`
+- Script: `experiments/noise_state_oracle.py`
+- Outputs:
+	- `outputs/figures/fig_noise_state_oracle_error_vs_time.png`
+	- `outputs/figures/fig_noise_state_oracle_timeseries_overlay.png` (shows $\eta\in\{0.001, 0.1\}$)
+	- `outputs/figures/fig_noise_state_oracle_phase_space_eta0.001.png`
+	- `outputs/figures/fig_noise_state_oracle_phase_space_eta0.1.png`
+	- `outputs/tables/coef_recovery_state_oracle.csv`
 
-That NPZ contains:
+Noise protocol: Gaussian noise is added to the observed states $X$; derivatives are **oracle** (computed from the true CLW RHS).
 
-- `coefficients`: array of shape `(4, n_features)`
-- `feature_names`: list/array of feature name strings (length `n_features`)
-- `threshold`: the selected STLSQ sparsity threshold
+### State noise + numerical derivatives (distinct regime)
 
-You can inspect it with:
+- Script: `experiments/noise_state_numerical.py`
+- Output (table only):
+	- `outputs/tables/coef_recovery_state_numerical.csv`
 
-```bash
-python - <<'PY'
-import numpy as np
-z = np.load('outputs/identified_model.npz', allow_pickle=True)
-print('keys:', z.files)
-print('coefficients shape:', z['coefficients'].shape)
-print('threshold:', z['threshold'])
-print('feature_names:', list(z['feature_names']))
-PY
-```
+Noise protocol: Gaussian noise is added to $X$ and derivatives are estimated numerically from the noisy states (finite differences).
 
-## Notes on the “oracle derivative” setup
+### Extended library comparison (no noise, oracle derivatives)
 
-- Trajectories are integrated with `solve_ivp`.
-- Derivatives are *not* estimated by finite differences.
-- Instead, the derivative at each sampled time is computed by re-evaluating the known RHS `clw_rhs(t, x, params)`.
+- Script: `experiments/extended_library.py`
+- Outputs:
+	- `outputs/tables/coef_recovery_extended_library.csv`
+	- (optional) `outputs/figures/fig_extended_library_overlay.png`
 
-That is the cleanest setting for verifying sparse regression recovers the correct functional form.
-# sindy-clw
+This compares fits using the physics-informed library vs an extended library (products of basis terms).
+
+## Code map
+
+- `experiments/`: experiment entrypoints.
+- `sindy_library/physics_informed.py`: authoritative physics-informed CLW library.
+- `sindy_library/extended.py`: extended library construction.
+- `sindy_utils.py`: shared fit/integration utilities.
+- `plotting.py`: minimal plotting helpers used by experiments.
+- `coeff_recovery.py`: ground-truth coefficients + coefficient recovery metrics.
