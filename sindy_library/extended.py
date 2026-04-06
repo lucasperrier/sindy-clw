@@ -10,7 +10,7 @@ Used only in the extended-library comparison experiment.
 
 from __future__ import annotations
 
-from itertools import combinations_with_replacement
+from itertools import combinations
 
 import numpy as np
 import pysindy as ps
@@ -94,19 +94,21 @@ def make_library(*, eps_inv: float = 1e-8, degree: int = 2) -> ps.CustomLibrary:
         _add_feature(f, str(name))
 
     for k in range(2, deg + 1):
-        for combo in combinations_with_replacement(product_terms, k):
-            funcs_k = [f for (f, _n) in combo]
+        for combo in combinations(product_terms, k):
+            funcs_k = tuple(f for (f, _n) in combo)
             names_k = [str(_n) for (_f, _n) in combo]
             name = "*".join(names_k)
 
-            def prod_feature(p, s, z, c, _funcs=tuple(funcs_k)):
-                vals = None
-                for ff in _funcs:
-                    v = np.asarray(ff(p, s, z, c), dtype=float)
-                    vals = v if vals is None else vals * v
-                return np.asarray(vals, dtype=float)
+            def _make_prod(fns):
+                def prod_feature(p, s, z, c):
+                    vals = None
+                    for ff in fns:
+                        v = np.asarray(ff(p, s, z, c), dtype=float)
+                        vals = v if vals is None else vals * v
+                    return np.asarray(vals, dtype=float)
+                return prod_feature
 
-            _add_feature(prod_feature, name)
+            _add_feature(_make_prod(funcs_k), name)
 
     # deduplicate by name
     dedup_funcs: list[callable] = []

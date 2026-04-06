@@ -62,10 +62,14 @@ def enforce_constant_only_in_Cdot(model: ps.SINDy) -> None:
     if "1" not in names:
         return
     j = int(names.index("1"))
-    coef = model.coefficients()
+    coef = np.asarray(model.optimizer.coef_, dtype=float)
+    if coef.ndim < 2:
+        return
+    coef = coef.copy()
     coef[0, j] = 0.0
     coef[1, j] = 0.0
     coef[2, j] = 0.0
+    model.optimizer.coef_ = coef
 
 
 def count_nnz(model: ps.SINDy, *, nz_tol: float = 0.0) -> int:

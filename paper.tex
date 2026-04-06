@@ -23,8 +23,8 @@
 
 \begin{document}
 
-\title{Sparse Equation Discovery for a Reduced Tokamak Turbulence Model: \\
-Exact Recovery, Noise Robustness, and the Chaos Evaluation Problem}
+\title{Sparse Equation Discovery on the Chen--Lin--White Tokamak Model: \\
+A Controlled Benchmark of Noise, Derivative Estimation, and Library Design}
 
 \author{Lucas Perrier}
 \date{}
@@ -32,12 +32,15 @@ Exact Recovery, Noise Robustness, and the Chaos Evaluation Problem}
 \maketitle
 
 \begin{abstract}
-We apply sparse equation discovery (SINDy) to the Chen--Lin--White (CLW) reduced turbulence model, a four-dimensional chaotic system describing the interaction of a resistive tearing mode with an ion temperature gradient--driven mode in tokamak plasmas.
-Using a physics-informed candidate library, we show that the Sequential Thresholded Least Squares (STLSQ) algorithm achieves exact symbolic recovery---correct support and coefficient relative $L_2$ error below $10^{-15}$---when provided clean oracle derivatives.
-We then systematically characterize how identification degrades across three derivative estimation regimes (oracle, numerical finite differences, and Savitzky--Golay smoothed finite differences) under six noise levels spanning four decades.
-Library ablation experiments demonstrate that an overly rich degree-2 library maintains exact recovery in the noiseless case but amplifies false-positive inclusions under noise, while an incomplete library missing the rational term $(PZ/S)\sin C$ floors the coefficient error at ${\sim}0.48$ regardless of noise level.
-Because the CLW system is chaotic with a maximal Lyapunov exponent $\lambda_{\max} \approx 0.3$, we argue that equation recovery metrics---support identification and coefficient error---are the appropriate validation criteria, rather than long-horizon trajectory fidelity.
-All results are averaged over five random seeds with reported standard deviations.
+We study sparse equation discovery on the Chen--Lin--White (CLW) reduced tokamak turbulence model as a controlled benchmark rather than as a new algorithmic contribution.
+The CLW system is a four-dimensional chaotic ODE with a rational nonlinearity, making it a useful test case for assessing how standard SINDy behaves on a physically motivated but still tractable problem.
+Using STLSQ with a physics-informed candidate library, we first confirm an idealized upper bound: with clean states and exact right-hand-side derivatives, the true eight-term model is recovered to machine precision.
+We then evaluate three derivative regimes---analytic right-hand-side evaluation on noisy states, raw finite differences, and Savitzky--Golay smoothed finite differences---across six state-noise levels and five random seeds.
+Recovery is consistently strong for $\eta \le 10^{-2}$ and deteriorates rapidly near $\eta = 10^{-1}$, with smoothed finite differences giving the best low-noise coefficient accuracy but not extending the usable noise range.
+Two library ablations sharpen the interpretation: an extended degree-2 library still recovers the clean system but admits additional false positives under noise, while an incomplete library missing $(PZ/S)\sin C$ produces a persistent coefficient-error floor of about $0.48$ even at negligible noise.
+We also show that a simple penalized training-error criterion selects models near the threshold-path knee and behaves similarly to held-out validation, but neither that criterion nor BIC removes a non-monotonic sample-size trend caused by correlated, physically spurious features on the attractor.
+Because CLW is chaotic, we argue that support recovery, coefficient error, and short-horizon vector-field agreement are more informative than long-horizon rollout fidelity.
+The result is a reproducible baseline for future work on equation discovery in fusion-relevant reduced models.
 \end{abstract}
 
 \noindent\textbf{Keywords:} sparse identification of nonlinear dynamics, tokamak turbulence, equation discovery, chaotic systems, SINDy, Chen--Lin--White model
@@ -48,31 +51,40 @@ All results are averaged over five random seeds with reported standard deviation
 \section{Introduction}
 \label{sec:introduction}
 
-Understanding the dynamics of turbulence in magnetically confined plasmas is a central challenge in fusion energy research~\cite{Chen1984,Horton1999}.
-High-fidelity gyrokinetic simulations can capture the complex nonlinear interactions driving turbulent transport, but they are computationally prohibitive for parametric studies and real-time control.
-Reduced models that retain the essential physics in a low-dimensional ordinary differential equation (ODE) system offer an attractive alternative, provided the governing equations can be identified from data.
+Understanding when sparse equation discovery succeeds on nonlinear plasma models is more useful, at this stage, than claiming a new discovery pipeline for fusion dynamics.
+High-fidelity plasma simulations remain expensive, and low-dimensional reduced models continue to matter for mechanism studies, control-oriented modeling, and methodology development~\cite{Chen1984,Horton1999}.
+If sparse regression is to play a role in that workflow, practitioners need realistic baselines on systems that are more structured than textbook examples but still simple enough to admit careful error accounting.
 
-Sparse equation discovery has emerged as a principled approach to extracting interpretable governing equations from time-series data.
-The Sparse Identification of Nonlinear Dynamics (SINDy) framework~\cite{Brunton2016} formulates the problem as sparse regression: given state trajectories $\bX$ and their time derivatives $\bdx$, one seeks a sparse coefficient matrix $\bXi$ such that $\bdx \approx \bTheta(\bX)\,\bXi$, where $\bTheta(\bX)$ is a library of candidate nonlinear functions evaluated on the data.
-The appeal of SINDy lies in its simplicity, interpretability, and the \emph{a priori} imposition of parsimony through sparsity-promoting regression.
+The Sparse Identification of Nonlinear Dynamics (SINDy) framework~\cite{Brunton2016} offers a natural starting point.
+Given state data $\bX$ and derivatives $\bdx$, SINDy seeks a sparse coefficient matrix $\bXi$ such that $\bdx \approx \bTheta(\bX)\,\bXi$ for a chosen library $\bTheta(\bX)$ of candidate functions.
+Its appeal is interpretability: the output is an explicit set of governing equations rather than a black-box predictor.
+Its practical difficulty is equally clear.
+Recovery quality depends strongly on how derivatives are estimated, on whether the library contains the right terms, and on how model quality is judged when the underlying dynamics are chaotic.
 
-However, applying SINDy to physically relevant systems raises several practical challenges.
-First, derivative estimation from noisy measurements can introduce substantial errors that corrupt the regression~\cite{Schaeffer2017,Rudy2017}.
-Second, the choice of candidate library is critical: too narrow a library may exclude the true dynamics, while too broad a library increases the risk of false-positive term identification~\cite{Mangan2016}.
-Third, chaotic systems present a fundamental evaluation difficulty---even a perfect model produces trajectories that diverge exponentially from the truth at the Lyapunov timescale, making long-horizon error an unreliable metric~\cite{Strogatz2015}.
+Those three issues are usually explored separately.
+Derivative estimation under noise has been studied extensively~\cite{Schaeffer2017,Rudy2017}; library design and overcomplete dictionaries are a known challenge for sparse regression~\cite{Mangan2016}; and chaotic systems are notoriously hard to evaluate with long-horizon rollouts alone~\cite{Strogatz2015}.
+For a plasma-relevant reduced model, however, an honest end-to-end baseline is still useful: not to claim that standard SINDy solves the problem, but to identify the regimes in which it works, the regimes in which it fails, and the failure modes that remain after careful tuning.
 
-In this work, we use the Chen--Lin--White (CLW) reduced turbulence model~\cite{Chen1984} as a controlled testbed to investigate these challenges systematically.
-The CLW system describes the coupling of a resistive tearing mode with an ion temperature gradient (ITG)--driven mode through four ODEs governing the tearing mode amplitude $P$, the sound-wave amplitude $S$, the ITG mode amplitude $Z$, and a relative phase $C$.
-Despite its low dimensionality, the system exhibits rich chaotic dynamics that are representative of the nonlinear mode coupling observed in tokamak turbulence.
+We therefore use the Chen--Lin--White (CLW) model~\cite{Chen1984} as a benchmark problem.
+CLW couples a resistive tearing mode and an ion temperature gradient mode through four ODEs in the variables $P$, $S$, $Z$, and $C$.
+It is chaotic at the parameter setting considered here, yet small enough that the true coefficient matrix is known exactly and the consequences of library misspecification can be measured directly.
+The rational term $(PZ/S)\sin C$ is particularly useful for benchmarking because it is physically meaningful, non-polynomial, and difficult to approximate if the library is chosen poorly.
 
-We make the following contributions:
+The central claim of this paper is deliberately modest.
+We do not propose a new optimizer, a new differentiator, or a new plasma model.
+Instead, we provide a reproducible benchmark study of baseline STLSQ-SINDy on CLW, with enough ablations to make the results informative for both nonlinear-dynamics readers and plasma-modeling readers.
+The main contributions are:
+
 \begin{enumerate}
-\item We demonstrate exact symbolic recovery (correct support, coefficient error $< 10^{-15}$) of the CLW equations from a physics-informed library with oracle derivatives.
-\item We characterize the degradation of coefficient recovery across three derivative estimation regimes---oracle, numerical finite differences, and Savitzky--Golay smoothed finite differences (SFD)---under noise levels from $\eta = 10^{-4}$ to $\eta = 10$.
-\item We perform library ablation experiments testing an extended degree-2 library and an incomplete library to quantify the sensitivity of recovery to library specification.
-\item We provide a sample-size ablation and SFD hyperparameter sensitivity analysis.
-\item We formalize the argument that for chaotic systems, equation recovery (support identification and coefficient error) should take precedence over trajectory-level forecasting metrics.
+\item We establish an idealized upper bound by showing exact recovery from clean states and exact derivatives when the candidate library contains the true terms.
+\item We compare three practically relevant derivative regimes under measurement noise and identify a consistent failure threshold near $\eta = 10^{-1}$ for this system.
+\item We quantify the separate effects of library overspecification and library misspecification using extended and incomplete libraries.
+\item We test whether the main observations are artifacts of threshold tuning by examining threshold paths, held-out validation, sample size, BIC selection, and SFD hyperparameters.
+\item We argue that, for chaotic systems such as CLW, equation-level recovery metrics are the primary quantities of interest and that long-horizon trajectory agreement should be treated as supporting evidence only.
 \end{enumerate}
+
+The intended scope is therefore narrower, but more defensible, than a general-purpose SINDy paper.
+This is a benchmark paper about one physically motivated chaotic system, written to be useful precisely because it is explicit about what is idealized, what is robust, and what is not.
 
 
 %% ============================================================
@@ -84,21 +96,27 @@ The SINDy framework was introduced by Brunton, Proctor, and Kutz~\cite{Brunton20
 Extensions address noisy data through integral formulations~\cite{Schaeffer2017}, weak formulations~\cite{Messenger2021}, and ensemble methods~\cite{Fasel2022}.
 Rudy et al.~\cite{Rudy2017} extended the approach to partial differential equations.
 Champion et al.~\cite{Champion2019} combined SINDy with autoencoders for coordinate discovery in high-dimensional systems.
+We deliberately restrict our study to the baseline STLSQ algorithm in order to establish a clear reference point against which more advanced methods can be compared on the CLW system.
 
 \paragraph{Derivative estimation.}
 Accurate derivative estimation is a known bottleneck for equation discovery from noisy data.
 Total variation regularization~\cite{Chartrand2011}, Savitzky--Golay filtering~\cite{Savitzky1964}, and spectral differentiation~\cite{Schaeffer2017} have been proposed.
 The PySINDy package~\cite{deSilva2020,Kaptanoglu2022} provides a unified interface to these methods through its \texttt{SmoothedFiniteDifference} differentiator.
+Our contribution is to compare three derivative regimes on the same chaotic system under identical noise and library conditions.
 
 \paragraph{Reduced plasma models.}
 The CLW system was derived by Chen, Lin, and White~\cite{Chen1984} as a reduced description of resistive tearing mode--ITG coupling in tokamak geometry.
-It has been used as a benchmark for nonlinear dynamics studies in plasma physics~\cite{Horton1999}.
-While sparse identification has been applied to other plasma-relevant systems~\cite{Dam2017,Kaptanoglu2020}, a systematic study of SINDy on the CLW model with controlled noise, library, and derivative estimation variations has not been reported.
+It has served as a compact model for nonlinear mode interaction and chaotic plasma dynamics~\cite{Horton1999}.
+Sparse system identification has also been explored on other plasma-relevant settings~\cite{Dam2017,Kaptanoglu2020}, but a focused baseline study of derivative noise, library choice, and chaos-aware evaluation on CLW has been missing.
 
 \paragraph{Evaluation of discovered equations in chaotic systems.}
 The exponential divergence of nearby trajectories in chaotic systems implies that long-horizon forecast error is a poor metric for model quality~\cite{Strogatz2015}.
 Short-horizon comparisons and statistical measures (e.g., Lyapunov exponents, attractor statistics) are more appropriate~\cite{Pathak2018,Vlachas2018}.
-We build on this insight by normalizing trajectory comparisons by the Lyapunov time and focusing the evaluation on coefficient-level metrics.
+We build on this insight by normalizing trajectory comparisons by the Lyapunov time and focusing evaluation primarily on coefficient-level metrics.
+
+\paragraph{Benchmark studies.}
+Several works have benchmarked SINDy variants on canonical systems (Lorenz, Lotka--Volterra, etc.); see, e.g., the comparison in~\cite{Fasel2022}.
+Our study extends this benchmarking tradition to a plasma-physics-motivated system whose rational nonlinearity $(PZ/S)\sin C$ and four-dimensional chaotic attractor present challenges not found in the standard test suite.
 
 
 %% ============================================================
@@ -161,17 +179,19 @@ This normalization ensures that $\eta$ represents the noise-to-signal ratio unif
 \subsection{Candidate Libraries}
 \label{sec:libraries}
 
-We consider three candidate libraries of increasing complexity:
+We consider three candidate libraries of increasing complexity.
+The physics-informed library encodes substantial domain knowledge and should be understood as a \emph{strong prior}---it is not representative of a blind discovery setting, but rather of the situation where a domain scientist has narrowed the functional forms and wishes to determine the precise sparse coefficients.
 
-\paragraph{Physics-informed library ($p = 10$ features).}
+\paragraph{Physics-informed library ($p = 10$ features, strong prior).}
 This library includes the constant function $1$, the four state variables $P$, $S$, $Z$, the trigonometric functions $\cos C$ and $\sin C$, the three bilinear-trigonometric terms $ZS\cos C$, $ZP\cos C$, $PS\cos C$, and the rational-trigonometric term $(PZ/S)\sin C$.
-The ten functions span the CLW dynamics exactly.
+The ten functions span the CLW dynamics exactly, meaning the ground truth lies in the column space of the library.
+Including this term requires prior knowledge of the rational coupling structure.
 
-\paragraph{Extended library ($p = 46$ features).}
-Starting from the same ten basis functions, we augment the library with all pairwise products of the nine non-constant basis functions, yielding $10 + \binom{9}{2} + 9 = 10 + 36 = 46$ features.
-This tests recovery when the true dynamics are representable but embedded in a much larger candidate space.
+\paragraph{Extended library ($p = 46$ features, weak prior).}
+Starting from the same ten basis functions, we augment the library with all pairwise cross-products of the nine non-constant basis functions, yielding $10 + \binom{9}{2} = 10 + 36 = 46$ features.
+This more closely approximates a scenario with weaker prior knowledge, where a practitioner includes ``all plausible degree-2 terms'' and relies on sparsity to select the correct subset.
 
-\paragraph{Incomplete library ($p = 9$ features).}
+\paragraph{Incomplete library ($p = 9$ features, misspecified prior).}
 We remove the rational term $(PZ/S)\sin C$ from the physics-informed library, leaving nine features.
 Because the true $\dot{C}$ equation contains this term, the dynamics are no longer representable.
 This ablation quantifies the penalty of library misspecification.
@@ -191,6 +211,9 @@ The best model is selected by minimizing a penalized score:
 \label{eq:model_selection}
 \end{equation}
 where MSE is the mean squared prediction error on the training data, nnz is the number of nonzero coefficients, and $w_\text{nnz} = 2 \times 10^{-3}$ is the sparsity penalty weight.
+The logarithmic MSE ensures that the score favors order-of-magnitude improvements in fit quality over incremental gains from additional terms.
+The weight $w_\text{nnz} = 2\times 10^{-3}$ was chosen so that a single additional term must reduce MSE by a factor of $e^{-0.002} \approx 0.998$ to be retained---a deliberately permissive threshold that slightly favors inclusion over exclusion.
+We verify in Section~\ref{sec:threshold_path} that this criterion selects models near the ``knee'' of the threshold path (where further sparsification abruptly increases MSE) and that replacing training MSE with a held-out validation MSE yields indistinguishable selected models.
 The constant term ``$1$'' is constrained to appear only in the $\dot{C}$ equation, reflecting the known structure.
 
 \subsection{Derivative Estimation Regimes}
@@ -199,8 +222,9 @@ The constant term ``$1$'' is constrained to appear only in the $\dot{C}$ equatio
 We compare three derivative estimation strategies of decreasing idealization:
 
 \begin{enumerate}
-\item \textbf{Oracle derivatives}: The exact right-hand side of the CLW system is evaluated at the (possibly noisy) state measurements.
-This is the most favorable scenario and serves as an upper bound on recovery quality.
+\item \textbf{Analytic RHS (``oracle'')}: The known right-hand side of the CLW system~\eqref{eq:clw_P}--\eqref{eq:clw_C} is evaluated at the (possibly noisy) state measurements $\tilde{\bX}$ to obtain $\dot{\tilde{\bX}} = f(\tilde{\bX})$.
+This provides exact derivatives \emph{only when the states are clean}; under noise, the derivatives inherit state-measurement error through the nonlinear RHS.
+We stress that this regime does not provide noise-free derivatives when $\eta > 0$.
 
 \item \textbf{Numerical finite differences (FD)}: Derivatives are computed from the noisy state measurements using second-order central differences via \texttt{numpy.gradient}.
 No smoothing is applied.
@@ -247,23 +271,33 @@ All metrics are reported as means $\pm$ standard deviations over five independen
 \section{Experimental Design}
 \label{sec:experiments}
 
-We organize our experiments into four groups:
+We organize the study around six experiment groups, chosen to support a compact benchmark narrative rather than an exhaustive methods paper.
 
 \paragraph{Experiment 1: Derivative regime comparison.}
-For each of the three derivative estimation methods (oracle, FD, SFD) and each noise level $\eta \in \{10^{-4}, 10^{-3}, 10^{-2}, 10^{-1}, 1, 10\}$, we fit a SINDy model and evaluate all metrics.
-This experiment isolates the effect of derivative quality on recovery.
+For each of the three derivative estimation methods (analytic RHS, FD, SFD) and each noise level $\eta \in \{10^{-4}, 10^{-3}, 10^{-2}, 10^{-1}, 1, 10\}$, we fit a SINDy model using the physics-informed library and evaluate all metrics.
+This is the primary experiment and isolates the effect of derivative quality on recovery.
 
 \paragraph{Experiment 2: Library ablation.}
 We compare the physics-informed, extended, and incomplete libraries.
-In the noiseless case with oracle derivatives, both the physics-informed and extended libraries achieve exact recovery (Table~\ref{tab:extended_clean}).
-Under noise, the extended library is tested with oracle derivatives across the full $\eta$ sweep to assess how library size interacts with noise (Table~\ref{tab:consolidated}).
+In the noiseless case with analytic RHS on clean states, both the physics-informed and extended libraries achieve exact recovery (Table~\ref{tab:extended_clean}).
+Under noise, the extended library is tested with analytic RHS derivatives across the full $\eta$ sweep to assess how library size interacts with noise (Table~\ref{tab:consolidated}).
 The incomplete library is tested similarly to quantify misspecification effects.
+For the extended library under noise, we additionally report which specific spurious terms are most frequently selected (Section~\ref{sec:false_positives}).
 
-\paragraph{Experiment 3: Sample-size ablation.}
-At a fixed moderate noise level $\eta = 0.01$ with oracle derivatives and the extended library, we sweep the number of training trajectories $n_\text{traj} \in \{25, 50, 100, 250, 500\}$ to assess data efficiency.
+\paragraph{Experiment 3: Model-selection diagnostics.}
+\label{sec:exp_diagnostics}
+We examine the threshold-path behavior at $\eta = 0.01$ (physics-informed library, analytic RHS) to visualize how nnz, coefficient error, and the model-selection score vary across all 25 STLSQ thresholds.
+We also compare train-MSE-based model selection with held-out validation-MSE-based selection across all seeds and noise levels (Section~\ref{sec:threshold_path}).
 
-\paragraph{Experiment 4: SFD sensitivity.}
+\paragraph{Experiment 4: Sample-size ablation.}
+At a fixed moderate noise level $\eta = 0.01$ with analytic RHS derivatives and the physics-informed library ($p=10$), we sweep the number of training trajectories $n_\text{traj} \in \{25, 50, 100, 250, 500\}$ to assess data efficiency.
+We pair this with a BIC-based variant to test whether the observed trend is an artifact of the fixed sparsity penalty.
+
+\paragraph{Experiment 5: SFD sensitivity.}
 We sweep the SFD window length $w \in \{5, 11, 21, 41\}$ and polynomial order $q \in \{2, 3, 5\}$ at three noise levels $\eta \in \{10^{-3}, 10^{-2}, 10^{-1}\}$ to characterize sensitivity to smoothing hyperparameters.
+
+\paragraph{Experiment 6: Chaos-aware trajectory evaluation.}
+We use short-horizon rollouts and Lyapunov-time normalization to illustrate why long-horizon trajectory agreement is not a reliable primary metric on CLW, even for the true model.
 
 
 %% ============================================================
@@ -272,13 +306,14 @@ We sweep the SFD window length $w \in \{5, 11, 21, 41\}$ and polynomial order $q
 
 \subsection{Exact Recovery in the Noiseless Regime}
 
-With clean data and oracle derivatives, both the physics-informed (10 features) and extended (46 features) libraries achieve exact symbolic recovery (Table~\ref{tab:extended_clean}).
+With clean data and analytic RHS derivatives (i.e.\ exact derivatives on exact states), both the physics-informed (10 features) and extended (46 features) libraries achieve exact sparse coefficient recovery (Table~\ref{tab:extended_clean}).
 The discovered coefficient matrix matches the ground truth to machine precision ($\epsilon_\text{coef} < 4 \times 10^{-16}$), with $\text{nnz} = 8 = k^\star$, $\text{TPR} = 1.0$, $\text{FPR} = 0.0$, and exact support match in all five seeds.
-This confirms that STLSQ can identify the correct sparse structure from the candidate library when given noiseless data and perfect derivatives, even when the library is substantially overspecified.
+This confirms that STLSQ can identify the correct sparse structure from the candidate library when given noiseless data and perfect derivatives, even when the library is substantially overspecified ($p=46$ vs.\ $k^\star=8$).
+We note that this result depends on the physics-informed library being a \emph{strong prior}: the 10-feature library contains exactly the true terms, while even the extended library is constructed by augmenting those same physics-informed basis functions rather than by generic polynomial expansion.
 
 \begin{table}[t]
 \centering
-\caption{Clean recovery with oracle derivatives (mean $\pm$ std, 5 seeds). Both libraries achieve exact symbolic recovery.}
+\caption{Clean recovery with analytic RHS derivatives on noise-free states (mean $\pm$ std, 5 seeds). Both libraries achieve exact coefficient recovery.}
 \label{tab:extended_clean}
 \begin{tabular}{lcccccc}
 \toprule
@@ -305,7 +340,7 @@ Figures~\ref{fig:rel_l2} and~\ref{fig:tpr} visualize the coefficient error and T
 \toprule
 Regime & $\eta$ & nnz & $\epsilon_\text{coef}$ & TPR & FPR & $\epsilon_\text{vf}$ \\
 \midrule
-\multirow{6}{*}{Oracle}
+\multirow{6}{*}{\shortstack[l]{Analytic\\RHS}}
 & $10^{-4}$ & 10.6 & 0.187 & 1.00 & 0.08 & 0.363 \\
 & $10^{-3}$ & 10.2 & 0.469 & 1.00 & 0.07 & 0.843 \\
 & $10^{-2}$ & 12.0 & 0.395 & 0.93 & 0.14 & 0.362 \\
@@ -346,40 +381,77 @@ Regime & $\eta$ & nnz & $\epsilon_\text{coef}$ & TPR & FPR & $\epsilon_\text{vf}
 \label{fig:tpr}
 \end{figure}
 
-Several patterns emerge:
+Several patterns are worth emphasizing.
 
 \paragraph{Low noise ($\eta \leq 10^{-2}$).}
-All three regimes recover all true terms ($\text{TPR} \geq 0.93$) with varying accuracy.
-The SFD regime achieves the lowest coefficient error ($\epsilon_\text{coef} = 0.026$--$0.112$), demonstrating the benefit of smoothing when noise is moderate relative to the signal.
-The numerical FD regime achieves excellent results at $\eta = 10^{-3}$ ($\epsilon_\text{coef} = 0.027$), comparable to SFD.
-The oracle regime shows higher variance at low noise due to its sensitivity to the noise in the state through which it evaluates the RHS.
+All three regimes retain most or all of the true support, but they are not equally accurate.
+SFD is best in this regime, with $\epsilon_\text{coef} = 0.026$--$0.112$ and perfect mean TPR through $\eta = 10^{-2}$.
+Raw finite differences are competitive at $\eta = 10^{-3}$.
+The analytic RHS regime is noticeably worse than either data-driven alternative at low noise because evaluating $f(\tilde{\bX})$ on noisy states pushes the state perturbation through products, trigonometric terms, and the rational factor $PZ/S$.
+In other words, the ``oracle'' regime is only idealized when the states are clean; once the states are noisy, it is a nonlinear error-propagation experiment rather than a gold standard.
 
 \paragraph{Moderate noise ($\eta = 10^{-1}$).}
-The SFD method degrades sharply, retaining only $\text{TPR} = 0.33$ with $\text{nnz} = 2.6$, indicating excessive sparsification.
-The oracle and FD regimes retain more structure ($\text{TPR} = 0.88$ and $0.58$, respectively), though coefficient accuracy is substantially degraded.
+This is the practical cliff for the present benchmark.
+SFD collapses to overly sparse models ($\text{nnz}=2.6$, mean TPR $0.33$), while the analytic RHS and FD regimes still retain some structure but no longer recover the equations cleanly.
+The exact failure point is system-specific, but the qualitative message is robust: for CLW, standard derivative handling does not buy much usable headroom beyond $\eta \approx 10^{-2}$.
 
 \paragraph{High noise ($\eta \geq 1$).}
 Recovery fails across all regimes.
-The oracle and SFD regimes converge to $\text{nnz} \approx 1$--$4$ with $\epsilon_\text{coef} \approx 1.0$, indicating that the discovered model is no better than the trivial zero predictor (for which $\epsilon_\text{coef} = 1$ by definition).
-The FD regime at $\eta = 10$ exhibits $\epsilon_\text{coef} = 3.67$ and $\epsilon_\text{vf} = 1.84$, reflecting catastrophic error amplification by finite differences on heavily corrupted data.
+The analytic RHS and SFD settings collapse toward trivial models, while FD becomes numerically unstable enough that the coefficient and vector-field errors exceed the zero-model baseline.
+This is the right place to stop claiming recovery and start treating the output as a failure mode.
 
 
 \subsection{Library Ablation}
 
 \paragraph{Extended library under noise.}
-Table~\ref{tab:library_ablation} compares the physics-informed (oracle) and extended (oracle) libraries under noise.
+Table~\ref{tab:library_ablation} compares the physics-informed (analytic RHS) and extended (analytic RHS) libraries under noise.
 In the clean case, both achieve exact recovery.
-Under noise, the extended library shows comparable coefficient error but elevated FPR ($0.06$--$0.19$ vs.\ $0.07$--$0.16$), reflecting spurious term inclusion from the larger candidate space.
-At high noise ($\eta \geq 1$), both libraries fail similarly.
+Under noise, the extended library does not destroy identifiability outright, but it creates more room for unstable false positives.
+That is the more realistic lesson for practice: a moderately overcomplete library may still work in easy regimes, yet the price is paid in interpretability once noise enters.
 
-\paragraph{Incomplete library.}
-The incomplete library, missing $(PZ/S)\sin C$, floors the coefficient error at $\epsilon_\text{coef} \approx 0.48$ regardless of noise level (Table~\ref{tab:library_ablation}).
-This floor reflects the irreducible error from the missing term: the $\dot{C}$ equation cannot be represented, and the optimizer compensates by distributing the unrepresented dynamics across available features, yielding persistently elevated FPR (${\sim}0.17$--$0.19$) even at $\eta = 10^{-4}$.
-The $\text{TPR}$ remains $1.0$ for $\eta \leq 0.1$ (all recoverable terms are found), confirming that the error is localized to the missing term.
+\subsubsection{False-Positive Term Identification}
+\label{sec:false_positives}
+
+To understand \emph{which} spurious terms the extended library selects under noise, we record the identity of every false-positive term across all 5 seeds and 5 noise levels ($\eta\in\{10^{-4},...,1\}$), yielding 25 total runs.
+Table~\ref{tab:false_positives} reports the most frequently selected non-true terms.
+The dominant false positives are concentrated in the $\dot{C}$ equation, where the linear terms $S$~(84\%), $P$~(80\%), and $\sin C$~(68\%) are most frequently included spuriously.
+This pattern is physically interpretable: the true $\dot{C}$ equation contains the rational-trigonometric term $(PZ/S)\sin C$, which is strongly correlated with its constituent sub-products $P$, $S$, $Z$, $\sin C$ when evaluated on the chaotic attractor.
+Under noise, regression variance ``leaks'' into these correlated features.
+The $\dot{P}$ and $\dot{S}$ equations show much lower false-positive rates ($\leq$20\%), consistent with their simpler nonlinear structure.
+No false-positive term appears in more than 84\% of runs, indicating that individual spurious inclusions are somewhat unstable across seeds and noise levels.
 
 \begin{table}[t]
 \centering
-\caption{Library ablation: physics-informed vs.\ extended vs.\ incomplete (oracle derivatives, mean over 5 seeds).}
+\caption{Most frequently selected false-positive terms in the extended library ($p=46$), across 5 seeds $\times$ 5 noise levels (analytic RHS). Terms appearing in fewer than 2/25 runs are omitted.}
+\label{tab:false_positives}
+\small
+\begin{tabular}{llcc}
+\toprule
+Equation & Spurious term & Count (/25) & Fraction \\
+\midrule
+$\dot{C}$ & $S$       & 21 & 0.84 \\
+$\dot{C}$ & $P$       & 20 & 0.80 \\
+$\dot{C}$ & $\sin C$  & 17 & 0.68 \\
+$\dot{C}$ & $\cos C$  &  7 & 0.28 \\
+$\dot{P}$ & $S$       &  5 & 0.20 \\
+$\dot{P}$ & $\cos C$  &  4 & 0.16 \\
+$\dot{S}$ & $P$       &  4 & 0.16 \\
+$\dot{P}$ & $\sin C$  &  2 & 0.08 \\
+$\dot{C}$ & $Z$       &  2 & 0.08 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Incomplete library.}
+The incomplete library, missing $(PZ/S)\sin C$, produces a persistent coefficient-error floor near $0.48$ (Table~\ref{tab:library_ablation}).
+This is one of the clearest findings in the paper.
+Even very low measurement noise cannot compensate for a missing structural term.
+The optimizer simply redistributes the missing dynamics onto available features, keeping TPR high for the recoverable terms while preserving a large irreducible model error.
+For this benchmark, library misspecification is therefore more damaging than moving from clean derivatives to mildly noisy derivatives.
+
+\begin{table}[t]
+\centering
+\caption{Library ablation: physics-informed vs.\ extended vs.\ incomplete (analytic RHS derivatives, mean over 5 seeds).}
 \label{tab:library_ablation}
 \small
 \begin{tabular}{llccccc}
@@ -414,14 +486,45 @@ Library & $\eta$ & nnz & $\epsilon_\text{coef}$ & TPR & FPR & $\epsilon_\text{vf
 
 \subsection{Sample-Size Ablation}
 
-Table~\ref{tab:sample_size} reports the effect of training set size at fixed $\eta = 0.01$ with oracle derivatives and the extended library.
-All configurations maintain $\text{TPR} \geq 0.975$, but the coefficient error and FPR vary substantially.
-At $n_\text{traj} = 25$, the best results are obtained ($\epsilon_\text{coef} = 0.107$, exact support in 1/5 seeds), while larger datasets show higher coefficient errors due to increased false-positive inclusion (FPR increases from 0.10 to 0.15).
-This counterintuitive result likely reflects the interaction between threshold selection and sample size: with more data, weaker spurious correlations survive the STLSQ threshold.
+Table~\ref{tab:sample_size} reports the effect of training set size at fixed $\eta = 0.01$ with analytic RHS derivatives and the physics-informed library ($p=10$).
+All configurations maintain high TPR, but the coefficient error and FPR vary non-monotonically.
+At $n_\text{traj} = 25$, the best mean results are obtained ($\epsilon_\text{coef} = 0.107$, exact support in 1/5 seeds), while larger datasets show higher mean coefficient errors.
+
+This counterintuitive pattern does not appear to be a small-sample artifact.
+Instead, it arises from the interaction between model selection and correlated features on the attractor.
+The penalized score~\eqref{eq:model_selection} selects the threshold $\lambda$ that minimizes $\log(\text{MSE}) + w_\text{nnz}\cdot\text{nnz}$.
+With more training data, weakly correlated but physically spurious features become easier to justify by pure prediction error, so the selected model can become less sparse even though the data are more informative.
+This is exactly the kind of result that a benchmark paper should report plainly: more data do not automatically improve equation recovery when the library contains correlated alternatives.
+
+\paragraph{BIC model selection does not resolve the anomaly.}
+To test whether the non-monotonic behavior is an artifact of the fixed sparsity penalty, we re-run the same sample-size sweep using the Bayesian Information Criterion: $\text{BIC} = n\,\log(\text{MSE}) + k\,\log n$, where $n$ is the total number of data points and $k = \text{nnz}$.
+Table~\ref{tab:sample_size_bic} shows that the anomaly persists and is in fact more pronounced under BIC:
+the FPR rises from 0.11 at $n_\text{traj}=25$ to 0.23 at $n_\text{traj}=500$, and no seed achieves exact support for $n_\text{traj}\geq 50$.
+
+This suggests that the problem is structural rather than merely heuristic.
+The spurious terms are genuinely predictive on the attractor, so a generic information criterion has little reason to reject them.
+For CLW, sparsity alone is not a sufficient proxy for physical correctness once the library contains correlated surrogates for the true rational interaction.
 
 \begin{table}[t]
 \centering
-\caption{Sample-size ablation ($\eta = 0.01$, oracle derivatives, extended library, 5 seeds).}
+\caption{BIC model selection: sample-size ablation ($\eta = 0.01$, analytic RHS, physics-informed library $p=10$, 5 seeds). Compare with the fixed-penalty results in Table~\ref{tab:sample_size}.}
+\label{tab:sample_size_bic}
+\begin{tabular}{rccccc}
+\toprule
+$n_\text{traj}$ & nnz & $\epsilon_\text{coef}$ & TPR & FPR & Exact \\
+\midrule
+25  & $11.6 \pm 2.6$ & $0.108 \pm 0.163$ & 1.00 & 0.11 & 1/5 \\
+50  & $14.2 \pm 2.6$ & $0.241 \pm 0.202$ & 1.00 & 0.19 & 0/5 \\
+100 & $14.6 \pm 1.5$ & $0.235 \pm 0.204$ & 1.00 & 0.21 & 0/5 \\
+250 & $14.8 \pm 2.4$ & $0.339 \pm 0.170$ & 0.98 & 0.22 & 0/5 \\
+500 & $15.0 \pm 2.0$ & $0.383 \pm 0.151$ & 0.98 & 0.23 & 0/5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Sample-size ablation ($\eta = 0.01$, analytic RHS, physics-informed library $p=10$, 5 seeds).}
 \label{tab:sample_size}
 \begin{tabular}{rccccc}
 \toprule
@@ -457,14 +560,35 @@ The key findings are:
 \end{figure}
 
 
+\subsection{Model-Selection Diagnostics}
+\label{sec:threshold_path}
+
+To justify the model-selection criterion~\eqref{eq:model_selection}, we examine the threshold path: the trajectory of key metrics across all 25 STLSQ thresholds at $\eta=0.01$ (physics-informed library, analytic RHS, seed~0).
+Figure~\ref{fig:threshold_path} shows that as the threshold increases from $10^{-6}$ to $10^{0}$, nnz decreases monotonically (from 37 to 4) while MSE increases; the penalized score exhibits a clear minimum near the ``knee'' of this trade-off.
+The selected model at this minimum (threshold $\lambda\approx 0.056$) has $\text{nnz}=11$ (8 true $+$ 3 spurious) with $\epsilon_\text{coef}\approx 0.10$.
+Notably, the exact-support model ($\text{nnz}=8$, $\lambda\approx 0.56$) achieves a lower coefficient error ($\epsilon_\text{coef}\approx 0.05$) but a slightly worse score because the MSE jump from removing 3 terms exceeds their sparsity penalty---illustrating the known trade-off of penalized model selection.
+
+We also compare train-MSE-based selection with held-out validation on a 20\% trajectory split.
+Across all 5 seeds $\times$ 5 noise levels, the mean coefficient error differs by less than 10\% between the two selection strategies ($\bar{\epsilon}_\text{train}=0.51$ vs.\ $\bar{\epsilon}_\text{val}=0.50$), and the mean nnz is comparable ($\bar{\text{nnz}}_\text{train}=9.8$ vs.\ $\bar{\text{nnz}}_\text{val}=10.1$).
+The two methods select the same STLSQ threshold in the majority of seed/noise combinations.
+This confirms that the training-MSE-based score is not overfitting the threshold choice for this data volume ($n_\text{traj}=250$, 500 time steps each).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.85\textwidth]{fig_threshold_path.pdf}
+\caption{Threshold-path diagnostics ($\eta=0.01$, physics-informed library, analytic RHS, seed~0). Left: nnz vs.\ threshold. Center: coefficient error vs.\ threshold. Right: penalized score (train and validation) vs.\ threshold. The vertical dashed line marks the selected threshold.}
+\label{fig:threshold_path}
+\end{figure}
+
+
 \subsection{The Chaos Evaluation Problem}
 
-Figure~\ref{fig:chaos} illustrates the fundamental evaluation challenge for chaotic systems: two trajectories of the CLW system initialized with $\Delta C = 10^{-6}$ diverge to $\mathcal{O}(1)$ differences within ${\sim}10$ time units (${\sim}3\,T_\lambda$).
-This divergence occurs for the \emph{true model}, not a discovered approximation, confirming that trajectory-level error at horizons beyond ${\sim}1$--$2\,T_\lambda$ reflects the sensitivity to initial conditions rather than model quality.
+Figure~\ref{fig:chaos} illustrates the central evaluation issue for this benchmark: two trajectories of the true CLW system initialized with $\Delta C = 10^{-6}$ diverge to $\mathcal{O}(1)$ differences within about $3\,T_\lambda$.
+That divergence is not a failure of identification; it is a property of the underlying dynamics.
+Long-horizon rollout mismatch therefore cannot be the main criterion for acceptance or rejection of a discovered model here.
 
-Figure~\ref{fig:error_vs_lyapunov} shows trajectory error normalized by Lyapunov time for models discovered in the three derivative regimes.
-In the SFD regime at low noise ($\eta \leq 10^{-2}$), the discovered model tracks the truth for ${\sim}1$--$2\,T_\lambda$ before exponential divergence, consistent with a near-exact model.
-At higher noise, the initial error is larger and divergence sets in within a fraction of $T_\lambda$.
+Figure~\ref{fig:error_vs_lyapunov} makes the supporting point: in the low-noise SFD regime, the learned model follows the reference dynamics for about one to two Lyapunov times before the expected divergence, whereas noisier models separate almost immediately.
+Short-horizon agreement is therefore useful as a sanity check, but support recovery and coefficient error remain the better primary metrics.
 
 \begin{figure}[t]
 \centering
@@ -492,54 +616,44 @@ At higher noise, the initial error is larger and divergence sets in within a fra
 \section{Discussion}
 \label{sec:discussion}
 
-\subsection{Summary of Findings}
+\subsection{What This Benchmark Shows}
 
-Our experiments establish a clear hierarchy of difficulty for sparse equation discovery on the CLW system:
+The paper supports four main claims.
+First, baseline STLSQ-SINDy can recover the CLW equations exactly in the idealized regime where both the states and derivatives are effectively exact and the library contains the true functional form.
+Second, for this system the practically useful noise range is limited: coefficient recovery remains credible through about $\eta = 10^{-2}$ and breaks down near $\eta = 10^{-1}$ regardless of derivative strategy.
+Third, library choice matters at least as much as derivative estimation.
+An overcomplete library mainly harms interpretability through false positives, while an incomplete library can impose a large error floor even when the data are almost clean.
+Fourth, chaotic rollout divergence should be interpreted carefully; it is expected behavior on CLW and does not by itself refute a good local equation model.
 
-\begin{enumerate}
-\item \textbf{Noiseless, oracle derivatives}: Exact recovery is achievable with both physics-informed and overly rich libraries. STLSQ reliably selects the correct 8-term support from up to 46 candidate features.
+These claims are narrower than the claims typically made in methodological machine-learning papers, but that narrower scope is a strength here.
+The value of the study lies in calibration: a reader can see what a standard pipeline does on a nontrivial plasma-motivated system before trying more elaborate identification methods.
 
-\item \textbf{Low noise ($\eta \leq 10^{-2}$)}: All derivative regimes maintain $\text{TPR} \geq 0.93$. SFD provides the best coefficient accuracy, reducing $\epsilon_\text{coef}$ by an order of magnitude relative to oracle-on-noisy-state at $\eta = 10^{-3}$.
+\subsection{Practical Implications}
 
-\item \textbf{Moderate noise ($\eta = 10^{-1}$)}: The SFD regime undergoes a phase transition, collapsing to ${\sim}2.6$ terms. Oracle and FD regimes retain more structure but with degraded accuracy.
+For practitioners, the results suggest a simple ordering of priorities.
+If a plausible physics-informed library is available, getting the library structure right is more important than marginal improvements in threshold tuning.
+If the measurements are noisy, smoothed finite differences are worthwhile in the low-noise regime, but they should not be expected to rescue recovery once the derivative signal is badly contaminated.
+And if the goal is scientific interpretation rather than forecasting, support recovery and coefficient error should be treated as the headline metrics.
 
-\item \textbf{High noise ($\eta \geq 1$)}: Recovery fails uniformly. The coefficient error approaches or exceeds 1.0 (no better than zero), and support identification is effectively random.
-\end{enumerate}
-
-\subsection{The Role of Library Design}
-
-The library ablation reveals two complementary failure modes:
-\begin{itemize}
-\item \textbf{Overspecification} (extended library): Exact recovery is preserved in the noiseless case, confirming the theoretical identifiability. Under noise, the additional degrees of freedom provide more opportunities for spurious term inclusion, modestly increasing FPR.
-\item \textbf{Misspecification} (incomplete library): The missing rational term creates an irreducible error floor of $\epsilon_\text{coef} \approx 0.48$ that dominates at all noise levels below the general failure regime ($\eta \geq 1$). Importantly, this floor manifests even at $\eta = 10^{-4}$, where the physics-informed library achieves near-exact recovery.
-\end{itemize}
-
-These results underscore that library design is at least as critical as noise handling for practical equation discovery.
-
-\subsection{SFD: Benefits and Limitations}
-
-The Savitzky--Golay smoothed finite difference method provides a substantial improvement over raw finite differences at low-to-moderate noise, achieving the best coefficient accuracy among the three regimes for $\eta \leq 10^{-2}$.
-However, it exhibits a sharp ``cliff'' at $\eta \approx 10^{-1}$, where the smoothing becomes insufficient to suppress the noise-induced derivative error, and the STLSQ threshold eliminates most true terms.
-
-The SFD sensitivity analysis reveals that the window length is the dominant hyperparameter.
-Short windows ($w = 5$) minimize bias at low noise but provide insufficient smoothing at higher noise.
-Long windows ($w = 41$) introduce smoothing bias that inflates nnz regardless of noise level.
-Intermediate windows ($w = 11$--$21$) provide the most robust performance across noise levels.
+The sample-size and BIC ablations carry a less intuitive lesson.
+More data do not necessarily make the selected equation cleaner when the library contains correlated surrogate terms.
+On CLW, additional data can strengthen the evidence for terms that are predictive on the attractor but still physically wrong.
+That is a caution against assuming that generic information criteria are enough to separate physical structure from statistical convenience.
 
 \subsection{Limitations}
 
 We acknowledge several limitations of this study:
 
 \begin{itemize}
-\item \textbf{Single system}: Our experiments are restricted to the CLW model at one parameter setting. While this provides a complete controlled study, the results may not generalize to all chaotic ODE systems or to systems with qualitatively different nonlinearities.
+\item \textbf{Single system, single parameter set}: Our experiments are restricted to the CLW model at $\Gamma_d=2$, $\gamma_z=0.8$, $d=2$. While this provides a complete controlled study, the quantitative noise thresholds and error magnitudes may not generalize to other chaotic ODE systems or other CLW parameter regimes.
 
-\item \textbf{Reduced model}: The CLW system is a low-dimensional reduction of tokamak turbulence dynamics. Real plasma dynamics involve spatial degrees of freedom, multiple time scales, and sources of noise beyond additive Gaussian state corruption.
+\item \textbf{Reduced model vs.\ real plasma turbulence}: The CLW system is a low-dimensional ($n=4$) reduction of tokamak turbulence dynamics. Real plasma dynamics involve spatial degrees of freedom ($n\gg 4$), multiple time scales, closures with uncertain coefficients, and diagnostic noise that is non-Gaussian, state-dependent, and temporally correlated. Our additive Gaussian noise model is idealized.
 
-\item \textbf{Known library structure}: The physics-informed library was designed with knowledge of the true dynamics. In practice, a domain expert may not know the relevant nonlinearities \emph{a priori}; the extended-library results provide some guidance for this scenario.
+\item \textbf{Strong prior in library design}: The physics-informed library was designed with knowledge of the true dynamics, including the rational nonlinearity $PZ/S$. In practice, a domain expert may not know the relevant nonlinearities \emph{a priori}. The extended-library results partially address this, but even the extended library is built from physics-informed basis functions.
 
-\item \textbf{Additive Gaussian noise}: Our noise model is idealized. Experimental plasma diagnostics produce noise with potentially non-Gaussian, state-dependent, and temporally correlated structure.
+\item \textbf{Model selection remains heuristic}: The penalized score~\eqref{eq:model_selection} behaves reasonably and agrees well with held-out validation, but the sample-size ablation shows that no simple generic criterion resolves the correlated-feature problem on this attractor. A better selection rule may require additional physics priors or structured regularization.
 
-\item \textbf{No online or adaptive methods}: We use a fixed pipeline (data $\to$ derivatives $\to$ STLSQ). Iterative or Bayesian approaches that adapt the library or noise model during fitting~\cite{Fasel2022} may extend the recoverable noise range.
+\item \textbf{Baseline algorithm only}: We deliberately study a standard STLSQ pipeline. More advanced formulations---for example weak-form or Bayesian approaches~\cite{Messenger2021}---may improve robustness. The purpose of the present paper is to supply a transparent baseline against which such methods can be judged.
 \end{itemize}
 
 
@@ -547,25 +661,29 @@ We acknowledge several limitations of this study:
 \section{Conclusion}
 \label{sec:conclusion}
 
-We have presented a systematic study of sparse equation discovery applied to the Chen--Lin--White reduced tokamak turbulence model.
-Our key findings are:
+We have presented a controlled benchmark study of sparse equation discovery on the Chen--Lin--White reduced tokamak turbulence model.
+The main outcome is not a new algorithmic claim, but a calibrated picture of what baseline STLSQ-SINDy can and cannot do on this chaotic system.
 
 \begin{enumerate}
-\item \textbf{Exact recovery is achievable}: Given clean oracle derivatives and a library containing the true terms (even if substantially overspecified), STLSQ recovers the exact CLW equations with coefficient error below $10^{-15}$.
+\item \textbf{Idealized recovery is possible}: with clean states, exact derivatives, and a library that contains the true functional forms, CLW is recovered exactly.
 
-\item \textbf{Noise tolerance has clear boundaries}: All derivative estimation regimes maintain useful recovery ($\text{TPR} \geq 0.93$, $\epsilon_\text{coef} < 0.4$) for $\eta \leq 10^{-2}$, with SFD providing the best accuracy in this range. At $\eta \geq 10^{-1}$, recovery degrades substantially, and at $\eta \geq 1$, it fails entirely.
+\item \textbf{The useful noise range is limited}: for this benchmark, recovery is credible up to about $\eta = 10^{-2}$ and degrades sharply near $\eta = 10^{-1}$ across all derivative regimes.
 
-\item \textbf{Library design is critical}: An incomplete library floors the coefficient error at ${\sim}0.48$ regardless of noise level, while an overly rich library modestly increases false-positive risk. The practical implication is that ensuring the library contains the correct terms is more important than minimizing its size.
+\item \textbf{Library structure is decisive}: overspecification mainly introduces false positives, whereas misspecification creates a large irreducible error floor even at negligible noise.
 
-\item \textbf{Chaos requires equation-level evaluation}: For chaotic systems like CLW, trajectory comparison beyond ${\sim}1$--$2$ Lyapunov times ($T_\lambda \approx 3.3$) reflects sensitivity to initial conditions rather than model quality. We advocate for support recovery and coefficient error as the primary evaluation criteria.
+\item \textbf{Generic model-selection criteria have limits}: threshold-path and validation diagnostics support the chosen score, but neither that score nor BIC removes spurious correlated terms once they become predictively useful on the attractor.
+
+\item \textbf{Chaotic systems should be judged locally and structurally}: short-horizon agreement is informative, but support recovery, coefficient error, and vector-field error are the more reliable metrics.
 \end{enumerate}
 
-The CLW model, despite its low dimensionality, captures the essential challenges of sparse equation discovery in chaotic, fusion-relevant systems: nonlinear coupling, rational nonlinearities, and the chaos evaluation problem.
-Our results provide a quantitative baseline for future work on more complex plasma turbulence models, higher-dimensional systems, and more sophisticated sparsity-promoting algorithms.
+CLW is still a small and idealized problem, but it contains enough structure to expose real difficulties: nonlinear coupling, a rational interaction term, correlated surrogate features, and sensitive dependence on initial conditions.
+That makes it a useful intermediate benchmark between textbook dynamical systems and full plasma turbulence models.
+We expect the main value of this paper to be as a baseline reference for future studies that test stronger differentiation schemes, better-structured libraries, or more robust sparse regression methods on the same system.
 
-\subsection*{Code Availability}
+\subsection*{Code and Data Availability}
 
-All code and data to reproduce the experiments in this paper are available at \url{https://github.com/[repository]}.
+All code, data, and scripts to reproduce every table, figure, and analysis in this paper are available at \url{https://github.com/lucas-perrier/sindy-clw}.
+The repository includes fixed random seeds, pinned package versions (\texttt{requirements.txt}), and a single entry point (\texttt{experiments/run\_all.py}) that regenerates all results.
 
 
 %% ============================================================
