@@ -33,6 +33,13 @@ def main() -> None:
         REPO_ROOT / "experiments" / "noise_state_oracle.py",
         REPO_ROOT / "experiments" / "noise_state_numerical.py",
         REPO_ROOT / "experiments" / "extended_library.py",
+        REPO_ROOT / "experiments" / "noise_state_sindy_end_to_end.py",
+        REPO_ROOT / "experiments" / "extended_library_noise.py",
+        REPO_ROOT / "experiments" / "incomplete_library.py",
+        REPO_ROOT / "experiments" / "sample_size_ablation.py",
+        REPO_ROOT / "experiments" / "sfd_sensitivity.py",
+        REPO_ROOT / "experiments" / "consolidated_table.py",
+        REPO_ROOT / "experiments" / "paper_figures.py",
     ]
 
     missing = [p for p in scripts if not p.exists()]

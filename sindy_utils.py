@@ -94,3 +94,16 @@ def identified_rhs_from_model(model: ps.SINDy) -> callable:
         return np.asarray(model.predict(x), dtype=float).reshape(4,)
 
     return rhs
+
+
+def vector_field_error(model: ps.SINDy, X: np.ndarray, dX_true: np.ndarray) -> float:
+    """Mean relative L2 error of model.predict(X) vs dX_true.
+
+    Returns ||predict(X) - dX_true||_F / ||dX_true||_F.
+    """
+    X = np.asarray(X, dtype=float)
+    dX_true = np.asarray(dX_true, dtype=float)
+    dX_hat = np.asarray(model.predict(X), dtype=float)
+    num = float(np.linalg.norm(dX_hat - dX_true))
+    den = float(np.linalg.norm(dX_true))
+    return num / den if den > 0 else num

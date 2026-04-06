@@ -74,18 +74,67 @@ def build_true_coefficients(feature_names: Sequence[str], params: dict[str, floa
     return Xi
 
 
+def build_true_coefficients_partial(feature_names: Sequence[str], params: dict[str, float]) -> np.ndarray:
+    """Like build_true_coefficients but tolerates missing features.
+
+    Coefficients for missing terms are simply absent from the matrix (columns
+    only exist for features present in the library). This is used by the
+    incomplete-library ablation where truth ∉ span(library).
+    """
+
+    names = [str(s) for s in list(feature_names)]
+    idx = {name: j for j, name in enumerate(names)}
+
+    Gd = float(params["Gd"])
+    gz = float(params["gz"])
+    d = float(params["d"])
+
+    Xi = np.zeros((4, len(names)), dtype=float)
+
+    term_map: list[tuple[int, str, float]] = [
+        (0, "P", 1.0),
+        (0, "Z*S*cos(C)", -2.0),
+        (1, "S", -Gd),
+        (1, "Z*P*cos(C)", 1.0),
+        (2, "Z", -gz),
+        (2, "P*S*cos(C)", 2.0),
+        (3, "1", d),
+        (3, "(P*Z/S)*sin(C)", -1.0),
+    ]
+
+    for row, name, val in term_map:
+        if name in idx:
+            Xi[row, idx[name]] = val
+
+    return Xi
+
+
 @dataclass(frozen=True)
 class CoefMetrics:
     nnz: int
     rel_l2: float
+    tpr: float
+    fpr: float
+    exact_support: bool
 
 
 def coef_metrics(*, Xi_hat: np.ndarray, Xi_true: np.ndarray, nz_tol: float = 0.0) -> CoefMetrics:
-    """Return simple metrics used in the paper-style tables."""
+    """Return metrics used in the paper-style tables."""
     Xi_hat = np.asarray(Xi_hat, dtype=float)
     Xi_true = np.asarray(Xi_true, dtype=float)
     nnz = int(np.sum(np.abs(Xi_hat) > float(nz_tol)))
     num = float(np.linalg.norm(Xi_hat - Xi_true))
     den = float(np.linalg.norm(Xi_true))
     rel_l2 = num / den if den > 0 else num
-    return CoefMetrics(nnz=nnz, rel_l2=rel_l2)
+
+    true_nz = np.abs(Xi_true) > 0
+    hat_nz = np.abs(Xi_hat) > float(nz_tol)
+
+    n_true_nz = int(np.sum(true_nz))
+    n_true_z = int(np.sum(~true_nz))
+
+    tpr = float(np.sum(hat_nz & true_nz)) / n_true_nz if n_true_nz > 0 else 1.0
+    fpr = float(np.sum(hat_nz & ~true_nz)) / n_true_z if n_true_z > 0 else 0.0
+    exact_support = bool(np.array_equal(hat_nz, true_nz))
+
+    return CoefMetrics(nnz=nnz, rel_l2=rel_l2, tpr=tpr, fpr=fpr, exact_support=exact_support)

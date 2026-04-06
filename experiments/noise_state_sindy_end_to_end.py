@@ -35,6 +35,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import csv
 import os
+from collections import defaultdict
 from dataclasses import dataclass
 
 import numpy as np
@@ -44,7 +45,7 @@ from clw import clw_rhs
 from data import simulate_short_bursts
 from coeff_recovery import build_true_coefficients, coef_metrics
 from sindy_library.physics_informed import make_library
-from sindy_utils import CLWParams, STATE_NAMES, count_nnz, enforce_constant_only_in_Cdot, integrate, select_model_by_score
+from sindy_utils import CLWParams, STATE_NAMES, count_nnz, enforce_constant_only_in_Cdot, integrate, select_model_by_score, vector_field_error
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,7 @@ class Config:
     dt: float = 0.01
     burst_T: float = 5.0
     n_traj: int = 250
-    seed: int = 0
+    seeds: tuple[int, ...] = (0, 1, 2, 3, 4)
 
     # noise sweep
     eta_list: tuple[float, ...] = (1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0)
@@ -76,12 +77,12 @@ class Config:
     sfd_window_length: int = 21
     sfd_polyorder: int = 3
 
-    # regularized sparse regression (MANDATORY)
-    stlsq_alpha: float = 1e-3
+    # sparse regression (aligned with oracle/numerical experiments)
+    stlsq_alpha: float = 0.0
 
-    # thresholds: gentler than oracle-derivative experiments
-    thresholds: tuple[float, ...] = tuple(np.logspace(-6, -1, 18).astype(float).tolist())
-    nnz_weight: float = 5e-4
+    # thresholds: same range as oracle/numerical experiments
+    thresholds: tuple[float, ...] = tuple(np.logspace(-6, 0, 25).astype(float).tolist())
+    nnz_weight: float = 2e-3
 
     # short-horizon overlay
     x0: tuple[float, float, float, float] = (1.2, 1.0, 0.8, 0.5)
@@ -190,7 +191,7 @@ def _fit_and_select_model_end_to_end(
         optimizer = ps.STLSQ(
             threshold=float(thr),
             alpha=float(cfg.stlsq_alpha),
-            normalize_columns=True,  # (MANDATORY)
+            normalize_columns=False,
         )
         model = ps.SINDy(feature_library=lib, optimizer=optimizer, differentiation_method=diff)
 
@@ -209,11 +210,44 @@ def _fit_and_select_model_end_to_end(
         results.append({"threshold": float(thr), "mse": mse, "nnz": count_nnz(model), "model": model})
 
     best = select_model_by_score(results, nnz_weight=float(cfg.nnz_weight))
+    return best["model"]
 
-    # Return dX_int for the chosen threshold (for coefficient recovery).
-    dX_best_list = [np.asarray(diff(x, t=float(cfg.dt)), dtype=float) for x in X_used_list]
-    dX_best_all = np.concatenate(dX_best_list, axis=0)
-    return best["model"], dX_best_all
+
+def _write_raw_csv(path: str, rows: list[dict]) -> None:
+    fields = ["seed", "eta", "nnz", "coef_rel_l2", "tpr", "fpr", "exact_support", "vf_error"]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+
+def _write_summary_csv(path: str, raw_rows: list[dict], eta_list: tuple[float, ...]) -> None:
+    by_eta: dict[float, list[dict]] = defaultdict(list)
+    for r in raw_rows:
+        by_eta[float(r["eta"])].append(r)
+
+    fields = [
+        "eta", "nnz_mean", "nnz_std", "rel_l2_mean", "rel_l2_std",
+        "tpr_mean", "fpr_mean", "exact_support_frac", "vf_error_mean", "vf_error_std",
+    ]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for eta in eta_list:
+            g = by_eta[float(eta)]
+            w.writerow({
+                "eta": float(eta),
+                "nnz_mean": float(np.mean([r["nnz"] for r in g])),
+                "nnz_std": float(np.std([r["nnz"] for r in g])),
+                "rel_l2_mean": float(np.mean([r["coef_rel_l2"] for r in g])),
+                "rel_l2_std": float(np.std([r["coef_rel_l2"] for r in g])),
+                "tpr_mean": float(np.mean([r["tpr"] for r in g])),
+                "fpr_mean": float(np.mean([r["fpr"] for r in g])),
+                "exact_support_frac": float(np.mean([float(r["exact_support"]) for r in g])),
+                "vf_error_mean": float(np.mean([r["vf_error"] for r in g])),
+                "vf_error_std": float(np.std([r["vf_error"] for r in g])),
+            })
 
 
 def main() -> None:
@@ -223,48 +257,54 @@ def main() -> None:
 
     params = cfg.params.as_dict()
 
-    X_clean, _dX_oracle = simulate_short_bursts(params, n_traj=cfg.n_traj, T=cfg.burst_T, dt=cfg.dt, seed=cfg.seed)
-    sigma_x = _compute_sigma(X_clean)
-
     lib = make_library(eps_inv=float(cfg.eps_inv))
     lib.fit(np.zeros((1, 4)))
     feature_names = list(lib.get_feature_names(STATE_NAMES))
     Xi_true = build_true_coefficients(feature_names, params)
 
-    models_by_eta: dict[float, ps.SINDy] = {}
-    table_rows: list[dict] = []
+    raw_rows: list[dict] = []
+    models_first_seed: dict[float, ps.SINDy] = {}
 
-    for eta in cfg.eta_list:
-        rng = np.random.default_rng(_seed_for(base_seed=cfg.seed, eta=float(eta)))
-        X_noisy = _add_state_noise(X_clean, eta=float(eta), sigma=sigma_x, rng=rng)
+    for seed in cfg.seeds:
+        X_clean, dX_clean = simulate_short_bursts(params, n_traj=cfg.n_traj, T=cfg.burst_T, dt=cfg.dt, seed=seed)
+        sigma_x = _compute_sigma(X_clean)
+        X_clean_all = np.concatenate(X_clean, axis=0)
+        dX_clean_all = np.concatenate(dX_clean, axis=0)
 
-        model, dX_int_all = _fit_and_select_model_end_to_end(X_noisy_list=X_noisy, cfg=cfg)
+        for eta in cfg.eta_list:
+            rng = np.random.default_rng(_seed_for(base_seed=seed, eta=float(eta)))
+            X_noisy = _add_state_noise(X_clean, eta=float(eta), sigma=sigma_x, rng=rng)
 
-        # Coefficient recovery: coefficients are already in physical coordinates
-        # since we did not standardize the state.
-        Xi_hat = np.asarray(model.coefficients(), dtype=float)
-        m = coef_metrics(Xi_hat=Xi_hat, Xi_true=Xi_true)
-        table_rows.append({"eta": float(eta), "nnz": int(m.nnz), "coef_rel_l2": float(m.rel_l2)})
+            model = _fit_and_select_model_end_to_end(X_noisy_list=X_noisy, cfg=cfg)
 
-        models_by_eta[float(eta)] = model
+            Xi_hat = np.asarray(model.coefficients(), dtype=float)
+            m = coef_metrics(Xi_hat=Xi_hat, Xi_true=Xi_true)
+            vf_err = vector_field_error(model, X_clean_all, dX_clean_all)
+            raw_rows.append({
+                "seed": int(seed), "eta": float(eta),
+                "nnz": int(m.nnz), "coef_rel_l2": float(m.rel_l2),
+                "tpr": float(m.tpr), "fpr": float(m.fpr),
+                "exact_support": bool(m.exact_support), "vf_error": float(vf_err),
+            })
+
+            if seed == cfg.seeds[0]:
+                models_first_seed[float(eta)] = model
+
+    # Write raw and summary CSVs
+    raw_path = os.path.join(cfg.out_tab_dir, "coef_recovery_state_sindy_internal_raw.csv")
+    _write_raw_csv(raw_path, raw_rows)
 
     tab_path = os.path.join(cfg.out_tab_dir, "coef_recovery_state_sindy_internal.csv")
-    with open(tab_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["eta", "nnz", "coef_rel_l2"])
-        w.writeheader()
-        for r in table_rows:
-            w.writerow(r)
+    _write_summary_csv(tab_path, raw_rows, cfg.eta_list)
 
-    # Overlay figure: 2-column layout (eta=0.001 and eta=0.1), 4 stacked rows.
+    # --- Figures (first seed only) ---
     eta_low, eta_high = cfg.focus_etas
-    model_low = models_by_eta[float(eta_low)]
-    model_high = models_by_eta[float(eta_high)]
+    model_low = models_first_seed[float(eta_low)]
+    model_high = models_first_seed[float(eta_high)]
 
     rhs_true = lambda t, x: clw_rhs(t, x, params)
     t, X_true = integrate(rhs_true, dt=cfg.dt, T=cfg.overlay_T, x0=np.asarray(cfg.x0, dtype=float))
 
-    # Identified model overlay: explicit fixed-step roll-out (short horizon only).
-    # We clip S in feature evaluation to avoid extreme inverse values.
     t_hat, X_hat_low = _rollout_forward_euler(
         model=model_low,
         x0=np.asarray(cfg.x0, dtype=float),
@@ -293,7 +333,7 @@ def main() -> None:
         ax.set_ylabel(name)
         ax.grid(True, alpha=0.25)
         if i == 0:
-            ax.set_title(f"η={float(eta_low):g}")
+            ax.set_title(f"\u03b7={float(eta_low):g}")
             ax.legend(loc="upper right", frameon=False)
         if i == 3:
             ax.set_xlabel("t")
@@ -303,7 +343,7 @@ def main() -> None:
         ax.plot(t, X_hat_high[:, i], color="tab:red", linestyle="--", linewidth=1.3, label="Identified")
         ax.grid(True, alpha=0.25)
         if i == 0:
-            ax.set_title(f"η={float(eta_high):g}")
+            ax.set_title(f"\u03b7={float(eta_high):g}")
             ax.legend(loc="upper right", frameon=False)
         if i == 3:
             ax.set_xlabel("t")
@@ -315,14 +355,10 @@ def main() -> None:
     fig.savefig(fig_path, dpi=200)
     plt.close(fig)
 
-    print(f"Wrote table to {tab_path}")
-    print(f"Wrote overlay figure to {fig_path}")
-
-    # Error vs time figure: one curve per eta (short horizon only).
-    # We roll out each identified model from the SAME initial condition.
+    # Error vs time figure
     errs_by_eta: dict[float, np.ndarray] = {}
     for eta in cfg.eta_list:
-        model = models_by_eta[float(eta)]
+        model = models_first_seed[float(eta)]
         _, X_hat = _rollout_forward_euler(
             model=model,
             x0=np.asarray(cfg.x0, dtype=float),
@@ -335,7 +371,7 @@ def main() -> None:
 
     fig2, ax2 = plt.subplots(1, 1, figsize=(8.0, 4.5))
     for eta in cfg.eta_list:
-        ax2.plot(t, errs_by_eta[float(eta)], linewidth=1.4, label=f"η={float(eta):g}")
+        ax2.plot(t, errs_by_eta[float(eta)], linewidth=1.4, label=f"\u03b7={float(eta):g}")
     ax2.set_yscale("log")
     ax2.set_xlabel("t")
     ax2.set_ylabel(r"$\|x(t) - \hat{x}(t)\|_2$")
@@ -348,6 +384,9 @@ def main() -> None:
     fig2.savefig(fig2_path, dpi=200)
     plt.close(fig2)
 
+    print(f"Wrote raw table to {raw_path}")
+    print(f"Wrote summary table to {tab_path}")
+    print(f"Wrote overlay figure to {fig_path}")
     print(f"Wrote error-vs-time figure to {fig2_path}")
 
 
