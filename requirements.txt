@@ -2,5 +2,5 @@ numpy<3,>=1.26
 scipy<2,>=1.11
 matplotlib<4,>=3.8
 pysindy==1.7.5
-scikit-learn<1.6
+scikit-learn==1.5.2
 setuptools<81
