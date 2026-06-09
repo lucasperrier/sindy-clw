@@ -29,12 +29,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from clw import clw_rhs
-from data import simulate_short_bursts
+from clw_model.clw import clw_rhs
+from clw_model.data import simulate_short_bursts
 
 from sindy_library.physics_informed import make_library
-from sindy_utils import CLWParams, STATE_NAMES, fit_sindy, integrate, enforce_constant_only_in_Cdot, identified_rhs_from_model
-from plotting import plot_phase_space_psz, plot_timeseries_overlay_two
+from clw_model.sindy_utils import CLWParams, STATE_NAMES, fit_sindy, integrate, enforce_constant_only_in_Cdot, identified_rhs_from_model
+from clw_model.plotting import plot_phase_space_psz, plot_timeseries_overlay_two
 
 
 @dataclass(frozen=True)

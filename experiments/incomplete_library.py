@@ -30,10 +30,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from clw import clw_rhs
-from data import simulate_short_bursts
+from clw_model.clw import clw_rhs
+from clw_model.data import simulate_short_bursts
 from sindy_library.incomplete import make_library as make_incomplete
-from sindy_utils import (
+from clw_model.sindy_utils import (
     CLWParams,
     STATE_NAMES,
     count_nnz,
@@ -44,8 +44,8 @@ from sindy_utils import (
     select_model_by_score,
     vector_field_error,
 )
-from coeff_recovery import build_true_coefficients_partial, coef_metrics
-from plotting import plot_error_vs_time, plot_timeseries_overlay_three
+from clw_model.coeff_recovery import build_true_coefficients_partial, coef_metrics
+from clw_model.plotting import plot_error_vs_time, plot_timeseries_overlay_three
 
 
 @dataclass(frozen=True)

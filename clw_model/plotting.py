@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from sindy_utils import STATE_NAMES
+from clw_model.sindy_utils import STATE_NAMES
 
 
 def plot_error_vs_time(*, curves: dict[float, tuple[np.ndarray, np.ndarray]], outpath: str, title: str) -> None:
