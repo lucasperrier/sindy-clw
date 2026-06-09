@@ -20,7 +20,7 @@ This repository benchmarks Sparse Identification of Nonlinear Dynamics on the Ch
 | Extended library      | False positives when the candidate library is less constrained |
 | Incomplete library    | Failure when important terms are missing                       |
 
-The underlying benchmark summary is available in [`docs/main_results.csv`](docs/main_results.csv).
+The underlying benchmark summary is available in [`docs/main_results.csv`](docs/main_results.csv). Conference and project posters are in [`docs/poster_RNL_2025_LPERRIER.pdf`](docs/poster_RNL_2025_LPERRIER.pdf) and [`docs/poster_sindy.pdf`](docs/poster_sindy.pdf).
 
 ## Quick start
 
@@ -45,7 +45,7 @@ python experiments/run_all.py
 experiments/      Benchmark entry points
 sindy_library/    Physics-informed, extended, and incomplete candidate libraries
 clw_model/        Chen–Lin–White model and shared utilities
-docs/             Curated figures, results, and conference poster
+docs/             Curated figures, results, and conference/SINDy posters
 ```
 
 ## Limitations
