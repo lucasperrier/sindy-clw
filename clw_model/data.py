@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from clw import clw_rhs
+from clw_model.clw import clw_rhs
 
 def simulate_short_bursts(params,
                           n_traj=200,

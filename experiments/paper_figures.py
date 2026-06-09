@@ -36,9 +36,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
 
-from clw import clw_rhs
-from sindy_utils import CLWParams, STATE_NAMES, integrate
-from lyapunov import max_lyapunov_exponent
+from clw_model.clw import clw_rhs
+from clw_model.sindy_utils import CLWParams, STATE_NAMES, integrate
+from clw_model.lyapunov import max_lyapunov_exponent
 
 
 @dataclass(frozen=True)

@@ -61,7 +61,7 @@ def _augmented_rhs(t, y, params):
     x = y[:4]
     Q = y[4:].reshape(4, 4)
 
-    from clw import clw_rhs
+    from clw_model.clw import clw_rhs
     dx = clw_rhs(t, x, params)
     J = clw_jacobian(x, params)
     dQ = J @ Q
@@ -95,7 +95,7 @@ def compute_lyapunov_exponents(
 
     # --- discard transient ---
     if transient > 0:
-        from clw import clw_rhs
+        from clw_model.clw import clw_rhs
         sol = solve_ivp(
             lambda t, y: clw_rhs(t, y, params),
             (0.0, transient),

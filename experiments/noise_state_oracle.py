@@ -34,13 +34,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from clw import clw_rhs
-from data import simulate_short_bursts
+from clw_model.clw import clw_rhs
+from clw_model.data import simulate_short_bursts
 
 from sindy_library.physics_informed import make_library
-from sindy_utils import CLWParams, STATE_NAMES, count_nnz, enforce_constant_only_in_Cdot, fit_sindy, identified_rhs_from_model, integrate, select_model_by_score, vector_field_error
-from plotting import plot_error_vs_time, plot_phase_space_psz, plot_timeseries_overlay_three
-from coeff_recovery import build_true_coefficients, coef_metrics
+from clw_model.sindy_utils import CLWParams, STATE_NAMES, count_nnz, enforce_constant_only_in_Cdot, fit_sindy, identified_rhs_from_model, integrate, select_model_by_score, vector_field_error
+from clw_model.plotting import plot_error_vs_time, plot_phase_space_psz, plot_timeseries_overlay_three
+from clw_model.coeff_recovery import build_true_coefficients, coef_metrics
 
 
 @dataclass(frozen=True)

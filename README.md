@@ -1,71 +1,53 @@
-# sindy-clw (curated CLW SINDy mini-research repo)
+# Sparse Identification of Turbulence-State Dynamics for Fusion Plasmas
 
-This repo is intentionally narrow: it contains only the code needed to run a small set of CLW / SINDy experiments, organized into distinct regimes.
+This repository benchmarks Sparse Identification of Nonlinear Dynamics on the Chen–Lin–White reduced turbulence-state model for fusion plasmas. The goal is to test when SINDy can recover the governing equations, and how recovery degrades under noise, numerical derivative estimation, and imperfect candidate libraries.
 
-All experiment entrypoints live in `experiments/`.
+## Results
 
-## Install
+### Clean short-horizon recovery
 
-Install the dependencies in `requirements.txt`.
+![True and identified CLW trajectories over a short horizon](docs/figures/trajectory_example.png)
 
-## Run the experiments
+### Coefficient recovery under noise
 
-All outputs go to:
+![Relative coefficient error as the noise level increases](docs/figures/noise_sensitivity.png)
 
-- `outputs/figures/`
-- `outputs/tables/`
+| Experiment            | What it tests                                                  |
+| --------------------- | -------------------------------------------------------------- |
+| Clean baseline        | Whether SINDy recovers the equations in the ideal setting      |
+| Noisy states          | Robustness to measurement noise                                |
+| Numerical derivatives | Degradation when derivatives must be estimated                 |
+| Extended library      | False positives when the candidate library is less constrained |
+| Incomplete library    | Failure when important terms are missing                       |
 
-You can run everything in one go via:
+The underlying benchmark summary is available in [`docs/main_results.csv`](docs/main_results.csv).
+
+## Quick start
+
+```bash
+git clone https://github.com/lucasperrier/sindy-clw.git
+cd sindy-clw
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python experiments/poster_baseline.py
+```
+
+To regenerate all benchmark results, run:
 
 ```bash
 python experiments/run_all.py
 ```
 
-### Poster baseline (no noise, oracle derivatives, physics-informed library)
+## Repository structure
 
-- Script: `experiments/poster_baseline.py`
-- Outputs:
-	- `outputs/figures/fig_poster_timeseries_overlay.png`
-	- `outputs/figures/fig_poster_phase_space_chaos.png`
+```text
+experiments/      Benchmark entry points
+sindy_library/    Physics-informed, extended, and incomplete candidate libraries
+clw_model/        Chen–Lin–White model and shared utilities
+docs/             Curated figures, results, and conference poster
+```
 
-Notes:
+## Limitations
 
-- The long-horizon figure is a *chaos sensitivity* demo: it compares the true CLW system from $x_0$ vs the true CLW system from $x_0$ with a small perturbation only in $C$.
-
-### State noise + oracle derivatives (physics-informed library)
-
-- Script: `experiments/noise_state_oracle.py`
-- Outputs:
-	- `outputs/figures/fig_noise_state_oracle_error_vs_time.png`
-	- `outputs/figures/fig_noise_state_oracle_timeseries_overlay.png` (shows $\eta\in\{0.001, 0.1\}$)
-	- `outputs/figures/fig_noise_state_oracle_phase_space_eta0.001.png`
-	- `outputs/figures/fig_noise_state_oracle_phase_space_eta0.1.png`
-	- `outputs/tables/coef_recovery_state_oracle.csv`
-
-Noise protocol: Gaussian noise is added to the observed states $X$; derivatives are **oracle** (computed from the true CLW RHS).
-
-### State noise + numerical derivatives (distinct regime)
-
-- Script: `experiments/noise_state_numerical.py`
-- Output (table only):
-	- `outputs/tables/coef_recovery_state_numerical.csv`
-
-Noise protocol: Gaussian noise is added to $X$ and derivatives are estimated numerically from the noisy states (finite differences).
-
-### Extended library comparison (no noise, oracle derivatives)
-
-- Script: `experiments/extended_library.py`
-- Outputs:
-	- `outputs/tables/coef_recovery_extended_library.csv`
-	- (optional) `outputs/figures/fig_extended_library_overlay.png`
-
-This compares fits using the physics-informed library vs an extended library (products of basis terms).
-
-## Code map
-
-- `experiments/`: experiment entrypoints.
-- `sindy_library/physics_informed.py`: authoritative physics-informed CLW library.
-- `sindy_library/extended.py`: extended library construction.
-- `sindy_utils.py`: shared fit/integration utilities.
-- `plotting.py`: minimal plotting helpers used by experiments.
-- `coeff_recovery.py`: ground-truth coefficients + coefficient recovery metrics.
+This is a controlled benchmark, not a new SINDy algorithm. The results are based on a reduced four-dimensional turbulence-state model, so they should not be interpreted as direct validation on full tokamak plasma data. Long-horizon trajectory agreement is limited by chaotic sensitivity; coefficient recovery and short-horizon behavior are therefore emphasized.
