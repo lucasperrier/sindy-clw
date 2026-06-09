@@ -63,8 +63,8 @@ class Config:
     error_T: float = 20.0
     overlay_T: float = 20.0
 
-    out_fig_dir: str = os.path.join("outputs", "figures")
-    out_tab_dir: str = os.path.join("outputs", "tables")
+    out_fig_dir: str = os.path.join(str(REPO_ROOT), "outputs", "figures")
+    out_tab_dir: str = os.path.join(str(REPO_ROOT), "outputs", "tables")
 
 
 def _seed_for(*, base_seed: int, eta: float) -> int:

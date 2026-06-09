@@ -55,7 +55,7 @@ class Config:
     T_long_phase: float = 100.0
     delta_C: float = 1e-6
 
-    out_fig_dir: str = os.path.join("outputs", "figures")
+    out_fig_dir: str = os.path.join(str(REPO_ROOT), "outputs", "figures")
 
 
 def _select_best_model(*, X_list: list[np.ndarray], dX_list: list[np.ndarray], cfg: Config):

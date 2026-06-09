@@ -62,8 +62,8 @@ class Config:
     x0: tuple[float, float, float, float] = (1.2, 1.0, 0.8, 0.5)
     T_short: float = 8.0
 
-    out_tab_dir: str = os.path.join("outputs", "tables")
-    out_fig_dir: str = os.path.join("outputs", "figures")
+    out_tab_dir: str = os.path.join(str(REPO_ROOT), "outputs", "tables")
+    out_fig_dir: str = os.path.join(str(REPO_ROOT), "outputs", "figures")
 
 
 def _fit_best_model(*, X_list: list[np.ndarray], dX_list: list[np.ndarray], library, cfg: Config):

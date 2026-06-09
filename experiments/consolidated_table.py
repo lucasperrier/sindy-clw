@@ -29,7 +29,7 @@ def _read_csv(path: str) -> list[dict]:
 
 
 def main() -> None:
-    tab_dir = os.path.join("outputs", "tables")
+    tab_dir = os.path.join(str(REPO_ROOT), "outputs", "tables")
 
     out_fields = [
         "regime", "eta",

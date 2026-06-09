@@ -52,8 +52,8 @@ class FigConfig:
     T_error: float = 20.0
     delta_C: float = 1e-6
 
-    out_dir: str = os.path.join("outputs", "figures")
-    tab_dir: str = os.path.join("outputs", "tables")
+    out_dir: str = os.path.join(str(REPO_ROOT), "outputs", "figures")
+    tab_dir: str = os.path.join(str(REPO_ROOT), "outputs", "tables")
 
 
 def _read_csv(path: str) -> list[dict]:

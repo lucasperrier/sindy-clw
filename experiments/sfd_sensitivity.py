@@ -68,7 +68,7 @@ class Config:
     S_clip_min: float = 1e-3
     X_clip_abs: float = 1e3
 
-    out_tab_dir: str = os.path.join("outputs", "tables")
+    out_tab_dir: str = os.path.join(str(REPO_ROOT), "outputs", "tables")
 
 
 def _seed_for(*, base_seed: int, eta: float) -> int:

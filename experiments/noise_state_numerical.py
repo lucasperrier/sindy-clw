@@ -52,7 +52,7 @@ class Config:
     nnz_weight: float = 2e-3
     eps_inv: float = 1e-8
 
-    out_tab_dir: str = os.path.join("outputs", "tables")
+    out_tab_dir: str = os.path.join(str(REPO_ROOT), "outputs", "tables")
 
 
 def _seed_for(*, base_seed: int, eta: float) -> int:

@@ -67,8 +67,8 @@ class Config:
     nnz_weight: float = 2e-3
     eps_inv: float = 1e-8
     eta_list: tuple[float, ...] = (1e-4, 1e-3, 1e-2, 1e-1, 1.0)
-    out_fig_dir: str = os.path.join("outputs", "figures")
-    out_tab_dir: str = os.path.join("outputs", "tables")
+    out_fig_dir: str = os.path.join(str(REPO_ROOT), "outputs", "figures")
+    out_tab_dir: str = os.path.join(str(REPO_ROOT), "outputs", "tables")
 
 
 def _seed_for(*, base_seed: int, eta: float) -> int:

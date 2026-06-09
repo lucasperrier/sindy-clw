@@ -65,8 +65,8 @@ from clw_model.sindy_utils import (
 from clw_model.coeff_recovery import build_true_coefficients, coef_metrics
 
 
-OUT_TAB = os.path.join("outputs", "tables")
-OUT_FIG = os.path.join("outputs", "figures")
+OUT_TAB = os.path.join(str(REPO_ROOT), "outputs", "tables")
+OUT_FIG = os.path.join(str(REPO_ROOT), "outputs", "figures")
 os.makedirs(OUT_TAB, exist_ok=True)
 os.makedirs(OUT_FIG, exist_ok=True)
 
