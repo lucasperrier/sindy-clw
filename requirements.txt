@@ -1,4 +1,6 @@
-numpy>=1.26,<3
-scipy>=1.11,<2
-matplotlib>=3.8,<4
-pysindy>=1.7,<2
+numpy<3,>=1.26
+scipy<2,>=1.11
+matplotlib<4,>=3.8
+pysindy==1.7.5
+scikit-learn==1.5.2
+setuptools<81

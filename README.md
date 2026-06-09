@@ -20,7 +20,7 @@ This repository benchmarks Sparse Identification of Nonlinear Dynamics on the Ch
 | Extended library      | False positives when the candidate library is less constrained |
 | Incomplete library    | Failure when important terms are missing                       |
 
-The underlying benchmark summary is available in [`docs/main_results.csv`](docs/main_results.csv).
+The underlying benchmark summary is available in [`docs/main_results.csv`](docs/main_results.csv). Two posters accompany this work: the project poster [`docs/poster_SINDy_turbulence-state-dynamics.pdf`](docs/poster_SINDy_turbulence-state-dynamics.pdf) ("Sparse Identification of Turbulence State Dynamics for Fusion Plasmas") and the conference poster [`docs/poster_RNL2025_turbulence-modelling-ML-fusion.pdf`](docs/poster_RNL2025_turbulence-modelling-ML-fusion.pdf) (RNL 2025, "Turbulence state modelling using Machine Learning for fusion plasmas").
 
 ## Quick start
 
@@ -45,7 +45,7 @@ python experiments/run_all.py
 experiments/      Benchmark entry points
 sindy_library/    Physics-informed, extended, and incomplete candidate libraries
 clw_model/        Chen–Lin–White model and shared utilities
-docs/             Curated figures, results, and conference poster
+docs/             Curated figures, results, and conference/SINDy posters
 ```
 
 ## Limitations
